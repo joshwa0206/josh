@@ -1,2 +1,302 @@
-# josh
-naanmudhalvan
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Simple Blog with Comments</title>
+  <style>
+    :root{
+      --bg:#f6f8fb; --card:#fff; --accent:#0b5ed7;
+      --muted:#6b7280; --radius:10px;
+    }
+    body{font-family:Inter,system-ui,Segoe UI,Roboto,"Helvetica Neue",Arial; margin:0;background:var(--bg);color:#0f1724}
+    .container{max-width:900px;margin:28px auto;padding:18px}
+    header{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}
+    h1{margin:0;font-size:1.4rem}
+    .btn{background:var(--accent);color:white;padding:8px 12px;border-radius:8px;border:0;cursor:pointer}
+    .outline{background:transparent;color:var(--accent);border:2px solid var(--accent);}
+    .card{background:var(--card);padding:16px;border-radius:var(--radius);box-shadow:0 6px 18px rgba(6,10,15,0.06);margin-bottom:12px}
+    .list{display:grid;gap:12px}
+    .meta{color:var(--muted);font-size:.9rem;margin-top:6px}
+    .excerpt{color:#111827;margin-top:10px}
+    .link{color:var(--accent);cursor:pointer;text-decoration:underline}
+    nav{display:flex;gap:8px;align-items:center}
+    .small{font-size:.95rem;color:var(--muted)}
+    .comment-box textarea{width:100%;min-height:80px;padding:8px;border-radius:8px;border:1px solid #e6e9ee}
+    .comment{padding:10px;border-radius:8px;background:#fbfdff;border:1px solid #eef2ff;margin-bottom:8px}
+    .comment .who{font-weight:600}
+    .center{display:flex;justify-content:center;align-items:center}
+    @media (max-width:600px){.container{margin:12px;padding:12px}}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <h1>IBM-FE Blog (Simple)</h1>
+        <div class="small">A tiny demo: posts + comment section (local-only)</div>
+      </div>
+      <nav>
+        <div id="userState" class="small"></div>
+        <button id="loginBtn" class="btn">Login</button>
+        <button id="logoutBtn" class="btn outline" style="display:none">Logout</button>
+      </nav>
+    </header>
+
+    <main id="app">
+      <!-- Home list -->
+      <section id="homeView">
+        <div class="card">
+          <input id="searchInput" placeholder="Search posts..." style="width:100%;padding:10px;border-radius:8px;border:1px solid #e6e9ee" />
+        </div>
+        <div id="postsList" class="list"></div>
+      </section>
+
+      <!-- Post detail -->
+      <section id="postView" style="display:none">
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:start">
+            <div>
+              <h2 id="postTitle" style="margin:0"></h2>
+              <div id="postMeta" class="meta"></div>
+            </div>
+            <div>
+              <button id="backBtn" class="btn outline">← Back</button>
+            </div>
+          </div>
+          <div id="postContent" class="excerpt" style="margin-top:12px;"></div>
+        </div>
+
+        <div class="card">
+          <h3 style="margin-top:0">Comments <span id="commentCount" class="small" style="font-weight:600"></span></h3>
+
+          <div id="commentsList" style="margin-bottom:12px"></div>
+
+          <div id="commentArea">
+            <div class="comment-box">
+              <textarea id="commentText" placeholder="Write a helpful, respectful comment..."></textarea>
+            </div>
+            <div style="margin-top:8px;display:flex;gap:8px;justify-content:flex-end">
+              <button id="submitComment" class="btn">Post comment</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+<script>
+/* ===== Simple single-file blog + comments (localStorage) =====
+   - Save comments per post in localStorage under key "comments_{postId}".
+   - Login stores username in localStorage 'simple_blog_user'.
+   - Minimal XSS protection: escapeHtml before inserting user content.
+*/
+
+const samplePosts = [
+  { id: 'p1', title: 'Designing Accessible Front-Ends', author: 'A. Smith', date: '2025-09-01', excerpt: 'Accessibility is critical... learn quick tips for inclusive UI.', content: '<p>Accessibility ensures applications work for everyone. In this short post we cover semantic HTML, ARIA basics, and contrast considerations.</p>' },
+  { id: 'p2', title: 'React Patterns for Large Apps', author: 'R. Joshwa', date: '2025-09-10', excerpt: 'Scalable React architecture patterns for teams.', content: '<p>When apps grow, structure matters. Consider feature folders, lazy loading, and strong typing for maintainability.</p>' },
+  { id: 'p3', title: 'CSS Tips: Responsive Typography', author: 'I. Developer', date: '2025-08-22', excerpt: 'Fluid type using clamp() and better scaling.', content: '<p>Fluid typography helps keep designs balanced. Use clamp() with calc() for smooth scaling across breakpoints.</p>' }
+];
+
+const postsListEl = document.getElementById('postsList');
+const homeView = document.getElementById('homeView');
+const postView = document.getElementById('postView');
+const postTitle = document.getElementById('postTitle');
+const postMeta = document.getElementById('postMeta');
+const postContent = document.getElementById('postContent');
+const commentsList = document.getElementById('commentsList');
+const commentText = document.getElementById('commentText');
+const submitComment = document.getElementById('submitComment');
+const commentCount = document.getElementById('commentCount');
+const backBtn = document.getElementById('backBtn');
+const loginBtn = document.getElementById('loginBtn');
+const logoutBtn = document.getElementById('logoutBtn');
+const userState = document.getElementById('userState');
+const searchInput = document.getElementById('searchInput');
+
+let currentPostId = null;
+
+// --- Utils ---
+function escapeHtml(str){
+  if(!str) return '';
+  return str.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');
+}
+function nowIso(){ return new Date().toISOString(); }
+
+function getUser(){
+  return localStorage.getItem('simple_blog_user');
+}
+function setUser(name){
+  if(name) localStorage.setItem('simple_blog_user', name);
+  else localStorage.removeItem('simple_blog_user');
+  refreshUserUI();
+}
+function refreshUserUI(){
+  const u = getUser();
+  if(u){
+    userState.textContent = Signed in as ${u};
+    loginBtn.style.display = 'none';
+    logoutBtn.style.display = '';
+  } else {
+    userState.textContent = 'Not signed in';
+    loginBtn.style.display = '';
+    logoutBtn.style.display = 'none';
+  }
+}
+
+// comments stored: key = comments_{postId} -> JSON array [{id, user, content, createdAt}]
+function loadComments(postId){
+  const raw = localStorage.getItem('comments_' + postId);
+  if(!raw) return [];
+  try{ return JSON.parse(raw); } catch { return []; }
+}
+function saveComments(postId, arr){
+  localStorage.setItem('comments_' + postId, JSON.stringify(arr));
+}
+function addComment(postId, user, text){
+  const arr = loadComments(postId);
+  arr.push({ id: 'c_'+Date.now(), user, content: text, createdAt: nowIso() });
+  saveComments(postId, arr);
+  return arr;
+}
+
+// --- Rendering ---
+function renderPosts(filter=''){
+  postsListEl.innerHTML = '';
+  const q = filter.trim().toLowerCase();
+  const filtered = samplePosts.filter(p => !q || (p.title + p.excerpt + p.author).toLowerCase().includes(q));
+  if(filtered.length === 0){
+    postsListEl.innerHTML = <div class="card">No posts found.</div>;
+    return;
+  }
+  filtered.forEach(p=>{
+    const div = document.createElement('div');
+    div.className = 'card';
+    div.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+        <div style="flex:1">
+          <div style="display:flex;justify-content:space-between;align-items:start;gap:10px">
+            <div>
+              <h3 style="margin:0">${escapeHtml(p.title)}</h3>
+              <div class="meta">${escapeHtml(p.author)} · ${escapeHtml(p.date)}</div>
+            </div>
+            <div style="text-align:right">
+              <div class="small">${escapeHtml(p.excerpt)}</div>
+              <div style="margin-top:8px">
+                <button data-id="${p.id}" class="btn viewBtn">Read →</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    postsListEl.appendChild(div);
+  });
+}
+
+function renderPostDetail(postId){
+  const p = samplePosts.find(x=>x.id===postId);
+  if(!p) return showHome();
+  currentPostId = postId;
+  postTitle.textContent = p.title;
+  postMeta.textContent = ${p.author} · ${p.date};
+  // content is stored as safe HTML in sample posts; we'll insert it as innerHTML because it's trusted here.
+  // But comments are escaped before insertion.
+  postContent.innerHTML = p.content;
+  homeView.style.display = 'none';
+  postView.style.display = '';
+  renderComments(postId);
+}
+
+function renderComments(postId){
+  commentsList.innerHTML = '';
+  const arr = loadComments(postId);
+  commentCount.textContent = (${arr.length});
+  if(arr.length===0){
+    commentsList.innerHTML = <div class="small" style="color:var(--muted)">No comments yet. Be the first to comment!</div>;
+    return;
+  }
+  arr.slice().reverse().forEach(c=>{
+    const d = document.createElement('div');
+    d.className = 'comment';
+    d.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div class="who">${escapeHtml(c.user)}</div>
+          <div class="small" style="color:var(--muted)">${new Date(c.createdAt).toLocaleString()}</div>
+        </div>
+      </div>
+      <div style="margin-top:8px">${escapeHtml(c.content).replaceAll('\\n','<br/>')}</div>
+    `;
+    commentsList.appendChild(d);
+  });
+}
+
+// --- Actions ---
+postsListEl.addEventListener('click', (e)=>{
+  if(e.target.matches('.viewBtn')){
+    const id = e.target.dataset.id;
+    renderPostDetail(id);
+    window.scrollTo(0,0);
+  }
+});
+
+backBtn.addEventListener('click', showHome);
+
+function showHome(){
+  currentPostId = null;
+  homeView.style.display = '';
+  postView.style.display = 'none';
+  commentText.value = '';
+  renderPosts(searchInput.value || '');
+}
+
+submitComment.addEventListener('click', ()=>{
+  const user = getUser();
+  if(!user){
+    alert('Please login before posting a comment.');
+    return;
+  }
+  const txt = commentText.value.trim();
+  if(!txt){
+    alert('Please enter a comment.');
+    return;
+  }
+  addComment(currentPostId, user, txt);
+  commentText.value = '';
+  renderComments(currentPostId);
+  // scroll to new comment
+  commentsList.scrollIntoView({ behavior: 'smooth' });
+});
+
+loginBtn.addEventListener('click', ()=>{
+  const name = prompt('Enter your display name to sign in (no password for demo):');
+  if(!name) return;
+  const cleaned = name.trim().slice(0,60);
+  if(!cleaned) return alert('Invalid name.');
+  setUser(cleaned);
+});
+
+logoutBtn.addEventListener('click', ()=>{
+  if(confirm('Sign out?')) setUser(null);
+});
+
+// search
+searchInput.addEventListener('input', ()=> renderPosts(searchInput.value));
+
+// init
+(function init(){
+  refreshUserUI();
+  renderPosts();
+  // If this is a fresh install, seed 1 or 2 comments for demo (only if empty)
+  samplePosts.forEach(p=>{
+    const key = 'comments_' + p.id;
+    if(!localStorage.getItem(key)){
+      // seed one demo comment
+      saveComments(p.id, [{ id:'seed', user: 'Demo User', content: 'Nice post — thanks for sharing!', createdAt: new Date().toISOString() }]);
+    }
+  });
+})();
+</script>
+</body>
+</html>
