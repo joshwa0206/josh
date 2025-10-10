@@ -50,4 +50,4 @@ This project was developed as part of the **IBM Front-End Development** exercise
 2. Deployment:
    '''bash
    git clone
- https://joshwa0206.github.io/josh/
+ (https://joshwa0206.github.io/josh/)
